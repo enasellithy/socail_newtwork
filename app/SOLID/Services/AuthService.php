@@ -27,4 +27,14 @@ class AuthService
     {
         return $this->updateProfile($data);
     }
+
+    public function reset_password($data)
+    {
+        return $this->authRepository->reset_password($data);
+    }
+
+    public function updatePassword($data)
+    {
+        return $this->authRepository->updatePassword($data);
+    }
 }

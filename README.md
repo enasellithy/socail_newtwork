@@ -59,4 +59,33 @@ Laravel Version is 10
   GOOGLE_CLIENT_ID=
   GOOGLE_CLIENT_SECRET=
 
+### For Email Config add config in .env file
+MAIL_MAILER=smtp
+MAIL_HOST=sandbox.smtp.mailtrap.io
+MAIL_PORT=2525
+MAIL_USERNAME=
+MAIL_PASSWORD=
 
+
+## API 
+- Path is http://localhost:8000/api
+
+## End Point
+- register type => POST
+- login type => POST
+- reset_password type => POST
+- updatePassword type => POST
+- github type => GET
+- github/callback type => GET
+- google type => GET
+- google/callback type => GET
+- logout type => GET
+- updateProfile type => POST
+- get_friend_list type => GET TO Get Friend List
+- send_friend_request type => POST TO Send Friend Request
+- get_Friend_Requests type => GET To Get Friend Request
+- accept_friend_request type => POST To Accept Friend Request
+- deny_Friend_Request type => POST
+- unfriend type => POST
+- blockFriend type => POST
+- unblockFriend type => POST

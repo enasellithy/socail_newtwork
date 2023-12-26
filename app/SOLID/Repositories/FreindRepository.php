@@ -50,4 +50,16 @@ class FreindRepository
         auth()->user()->unfriend($id);
         return $this->whenDone('');
     }
+
+    public function blockFriend($id)
+    {
+        auth()->user()->blockFriend($id);
+        return $this->whenDone('');
+    }
+
+    public function unblockFriend($id)
+    {
+        auth()->user()->unblockFriend($id);
+        return $this->whenDone('');
+    }
 }

@@ -48,4 +48,14 @@ class FreindController extends Controller
     {
         return $this->freindService->unfriend($r->id);
     }
+
+    public function blockFriend(Request $r)
+    {
+        return $this->freindService->blockFriend($r->id);
+    }
+
+    public function unblockFriend(Request $r)
+    {
+        return $this->freindService->unblockFriend($r->id);
+    }
 }

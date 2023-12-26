@@ -191,7 +191,7 @@ trait Friendable
 
         $this->friends()->save($friendship);
 
-        Event::fire('friendships.blocked', [$this, $recipient]);
+//        Event::fire('friendships.blocked', [$this, $recipient]);
 
         return $friendship;
     }
@@ -205,7 +205,7 @@ trait Friendable
     {
         $deleted = $this->findFriendship($recipient)->whereSender($this)->delete();
 
-        Event::fire('friendships.unblocked', [$this, $recipient]);
+//        Event::fire('friendships.unblocked', [$this, $recipient]);
 
         return $deleted;
     }

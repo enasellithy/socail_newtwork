@@ -10,6 +10,8 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
 
 Route::post('register', [\App\Http\Controllers\API\Auth\RegisterController::class, 'register']);
 Route::post('login', [\App\Http\Controllers\API\Auth\LoginController::class, 'login']);
+Route::post('reset_password', [\App\Http\Controllers\API\Auth\LoginController::class, 'reset_password']);
+Route::post('updatePassword', [\App\Http\Controllers\API\Auth\LoginController::class,'updatePassword']);
 
 Route::get('/github', [\App\Http\Controllers\API\Auth\GithubAuthController::class,'auth']);
 Route::get('/github/callback', [\App\Http\Controllers\API\Auth\GithubAuthController::class,'callback']);
@@ -29,6 +31,8 @@ Route::group(['middleware' => 'auth:sanctum'],function () {
     Route::post('accept_friend_request',[\App\Http\Controllers\API\FreindController::class, 'accept_friend_request']);
     Route::post('deny_Friend_Request',[\App\Http\Controllers\API\FreindController::class, 'deny_Friend_Request']);
     Route::post('unfriend',[\App\Http\Controllers\API\FreindController::class, 'unfriend']);
+    Route::post('blockFriend',[\App\Http\Controllers\API\FreindController::class, 'blockFriend']);
+    Route::post('unblockFriend',[\App\Http\Controllers\API\FreindController::class, 'unblockFriend']);
 
 
 });

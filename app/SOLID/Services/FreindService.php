@@ -42,4 +42,14 @@ class FreindService
     {
         return $this->freindRepository->unfriend($id);
     }
+
+    public function blockFriend($id)
+    {
+        return $this->freindRepository->blockFriend($id);
+    }
+
+    public function unblockFriend($id)
+    {
+        return $this->freindRepository->unblockFriend($id);
+    }
 }
