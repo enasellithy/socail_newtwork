@@ -18,8 +18,8 @@ Laravel Version is 10
 - composer
 
 ## Install
-- git clone 
-- cd social
+- git clone https://github.com/enasellithy/socail_newtwork
+- cd socail_newtwork
 - composer install
 - cp .env.example .env
 - php artisan key:generate
