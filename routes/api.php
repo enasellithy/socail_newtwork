@@ -27,12 +27,16 @@ Route::group(['middleware' => 'auth:sanctum'],function () {
     Route::get('get_friend_list',[\App\Http\Controllers\API\FreindController::class, 'get_friend_list']);
     Route::post('send_friend_request',[\App\Http\Controllers\API\FreindController::class, 'send_friend_request']);
     Route::get('get_Friend_Requests',[\App\Http\Controllers\API\FreindController::class, 'get_Friend_Requests']);
-
     Route::post('accept_friend_request',[\App\Http\Controllers\API\FreindController::class, 'accept_friend_request']);
     Route::post('deny_Friend_Request',[\App\Http\Controllers\API\FreindController::class, 'deny_Friend_Request']);
     Route::post('unfriend',[\App\Http\Controllers\API\FreindController::class, 'unfriend']);
     Route::post('blockFriend',[\App\Http\Controllers\API\FreindController::class, 'blockFriend']);
     Route::post('unblockFriend',[\App\Http\Controllers\API\FreindController::class, 'unblockFriend']);
 
+    Route::resource('posts',\App\Http\Controllers\API\PostController::class)->except('update');
+    Route::resource('comment', \App\Http\Controllers\API\CommentController::class)->only('store');
+    Route::resource('like', \App\Http\Controllers\API\LikeController::class)->only('store');
+    Route::resource('share', \App\Http\Controllers\API\ShareController::class)->only('store');
+    Route::resource('feed', \App\Http\Controllers\API\FeedController::class)->only('index');
 
 });

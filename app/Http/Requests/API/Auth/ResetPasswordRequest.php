@@ -7,7 +7,7 @@ use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
 
-class RegisterRequest extends FormRequest
+class ResetPasswordRequest extends FormRequest
 {
     use JsonTrait;
 
@@ -19,25 +19,10 @@ class RegisterRequest extends FormRequest
     public function rules()
     {
         return [
-            'name' => [
-                'required',
-                'string',
-                'min:3',
-                'max:25',
-            ],
             'email' => [
                 'required',
                 'email',
-                'unique:users',
-            ],
-            'password' => [
-                'required',
-                'min:6',
-                'max:25',
-            ],
-            'password_confirm' => [
-                'required',
-                'same:password'
+                'exists:users',
             ],
         ];
     }

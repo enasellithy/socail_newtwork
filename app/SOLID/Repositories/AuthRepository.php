@@ -20,7 +20,7 @@ class AuthRepository
 
     public function login(array $data)
     {
-        if(Auth::attempt(['emails' => $data['emails'], 'password' => $data['password']])){
+        if(Auth::attempt(['email' => $data['email'], 'password' => $data['password']])){
             $user = Auth::user();
             return $this->whenDone([
                 'token' => 'Bearer '.$user->createToken('MyApp')->plainTextToken,
@@ -42,7 +42,7 @@ class AuthRepository
 
     public function reset_password(array $data)
     {
-        $user = User::where('emails',$data['emails']);
+        $user = User::where('email',$data['email']);
         if($user->count() == 0){
             return $this->whenError('','Email Not Found');
         }else{

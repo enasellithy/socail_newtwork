@@ -1,13 +1,13 @@
 <?php
 
-namespace App\Http\Requests\API\Auth;
+namespace App\Http\Requests\API;
 
 use App\SOLID\Traits\JsonTrait;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\Exceptions\HttpResponseException;
 
-class LoginRequest extends FormRequest
+class ShareRequest extends FormRequest
 {
     use JsonTrait;
 
@@ -19,16 +19,11 @@ class LoginRequest extends FormRequest
     public function rules()
     {
         return [
-            'email' => [
+            'post_id' => [
                 'required',
-                'email',
-                'exists:users',
-            ],
-            'password' => [
-                'required',
-                'min:6',
-                'max:25',
-            ],
+                'numeric',
+                'exists:posts,id',
+            ]
         ];
     }
 

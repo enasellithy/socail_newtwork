@@ -15,11 +15,11 @@ class SocialAuthRepository
     public function callbackGithub()
     {
         $user = Socialite::driver('github')->stateless()->user();
-        $email = User::where('emails',$user->email)->first();
+        $email = User::where('email',$user->email)->first();
         if(!$email){
             $userData =  User::create([
                 'name' => $user->name,
-                'emails' => $user->email,
+                'email' => $user->email,
             ]);
             Provider::create([
                 'user_id' => $userData->id,
@@ -48,11 +48,11 @@ class SocialAuthRepository
     public function callbackGoogle()
     {
         $user = Socialite::driver('google')->stateless()->user();
-        $email = User::where('emails',$user->email)->first();
+        $email = User::where('email',$user->email)->first();
         if(!$email){
             $userData =  User::create([
                 'name' => $user->name,
-                'emails' => $user->email,
+                'email' => $user->email,
             ]);
             Provider::create([
                 'user_id' => $userData->id,

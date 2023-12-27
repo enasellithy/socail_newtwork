@@ -13,7 +13,7 @@ class UserResource extends JsonResource
         return [
             'id' => $this->id,
             'name' => $this->name,
-            'emails' => $this->email,
+            'email' => $this->email,
             'image' => !empty($this->image) ? asset($this->image) : '',
             'bio' => $this->bio,
             'provider' => ProviderResource::collection($this->provider),

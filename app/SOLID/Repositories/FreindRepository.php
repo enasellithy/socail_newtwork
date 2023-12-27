@@ -13,7 +13,8 @@ class FreindRepository
     public function get_friend_list()
     {
         $user = auth()->user();
-        $data['friend'] = $user->getFriends();
+        $data['friend'] = UserResource::collection($user->getFriends());
+        $data['friend_count'] = $user->getFriendsCount();
         return $this->whenDone($data);
     }
 
