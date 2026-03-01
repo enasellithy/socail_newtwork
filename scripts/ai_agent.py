@@ -1,71 +1,52 @@
 import os
 import subprocess
-import google.generativeai as genai
 import requests
+from openai import OpenAI
 
-# 1. إعداد الإعدادات
-GENAI_KEY = os.getenv("GEMINI_API_KEY")
+# إعدادات Groq
+GROQ_KEY = os.getenv("GROQ_API_KEY")
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 REPO = os.getenv("REPO_NAME")
 SHA = os.getenv("COMMIT_SHA")
 
-genai.configure(api_key=GENAI_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+client = OpenAI(
+    base_url="https://api.groq.com/openai/v1",
+    api_key=GROQ_KEY
+)
 
 def get_git_diff():
     try:
-        # بيجيب الفرق بين آخر تعديل واللي قبله
         diff = subprocess.check_output(['git', 'diff', 'HEAD~1', 'HEAD']).decode('utf-8')
         return diff
-    except Exception as e:
-        print(f"Error getting diff: {e}")
+    except:
         return None
-
-def post_comment(body):
-    # بيبعت مراجعة الـ AI كـ Comment على الـ Commit في GitHub
-    url = f"https://api.github.com/repos/{REPO}/commits/{SHA}/comments"
-    headers = {
-        "Authorization": f"token {GITHUB_TOKEN}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    payload = {"body": body}
-    response = requests.post(url, json=payload, headers=headers)
-    return response.status_code
 
 def main():
     diff = get_git_diff()
-    if not diff or len(diff) < 10:
-        print("No significant changes to analyze.")
+    if not diff:
+        print("No changes found.")
         return
 
-    # البرومبت مخصص لـ Laravel
-    prompt = f"""
-    You are a Senior Laravel & PHP Expert. Analyze the following code diff:
-    
-    {diff}
-
-    Please provide:
-    1. **Code Review**: Check for Laravel best practices, security (SQLi, XSS), and performance (N+1 queries).
-    2. **Refactoring**: Suggest a cleaner way to write the code if possible.
-    3. **Unit Test**: Generate a PHPUnit or Pest test for the new logic added.
-    
-    Format your response in Markdown. Keep it concise and professional.
-    """
-
-    print("Analyzing code with Gemini...")
+    print("Analyzing with Groq AI...")
     try:
-        response = model.generate_content(prompt)
-        ai_comment = "🤖 **AI Dev Agent Review:**\n\n" + response.text
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "You are a Laravel Expert. Review code and provide tests."},
+                {"role": "user", "content": f"Review this Laravel diff and generate PHPUnit tests:\n\n{diff}"}
+            ]
+        )
         
-        status = post_comment(ai_comment)
-        if status == 201:
-            print("Successfully posted AI review to GitHub!")
-        else:
-            print(f"Failed to post comment. Status: {status}")
-            print(ai_comment) # اطبع المراجعة في اللوج لو الكومنت فشل
-            
+        result = completion.choices[0].message.content
+                with open("ai_review.md", "w", encoding="utf-8") as f:
+            f.write("# AI Code Review Result\n\n")
+            f.write(result)
+        print("Review saved to ai_review.md")
+        url = f"https://api.github.com/repos/{REPO}/commits/{SHA}/comments"
+        requests.post(url, json={"body": result}, headers={"Authorization": f"token {GITHUB_TOKEN}"})
+
     except Exception as e:
-        print(f"Error during AI generation: {e}")
+        print(f"Error: {e}")
 
 if __name__ == "__main__":
     main()
