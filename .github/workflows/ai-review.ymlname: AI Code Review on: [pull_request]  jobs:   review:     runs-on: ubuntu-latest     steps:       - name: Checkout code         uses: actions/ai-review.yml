@@ -1,0 +1,16 @@
+name: AI Code Review
+on: [pull_request]
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: AI Review Step
+        run: |
+          # Use a tool like 'pr-agent' or a custom python script
+          # to send code diffs to Gemini and post a comment back to the PR.
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
