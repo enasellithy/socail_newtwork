@@ -1,4 +1,4 @@
-name: Laravel AI Dev Agent
+name: Laravel AI Dev Agent (Groq)
 
 on:
   push:
@@ -9,9 +9,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      pull-requests: write
-      statuses: write
-
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -21,23 +18,23 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: '3.11' # حدثنا النسخة لتجنب التحذيرات
 
-      # الخطوة دي كانت ناقصة عندك المرة اللي فاتت 👇
-      - name: Install AI Library
-        run: |
-          pip install google-generativeai requests
+      - name: Install Dependencies
+        run: pip install openai requests
 
-      - name: Run AI Review & Test Generation
+      - name: Run AI Agent
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMIT_SHA: ${{ github.sha }}
           REPO_NAME: ${{ github.repository }}
         run: |
           FILE_PATH=$(find . -name "ai_agent.py" | head -n 1)
-          if [ -z "$FILE_PATH" ]; then
-            echo "Error: ai_agent.py not found!"
-            exit 1
-          fi
           python "$FILE_PATH"
+
+      - name: Upload Review File
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-code-review
+          path: ai_review.md
