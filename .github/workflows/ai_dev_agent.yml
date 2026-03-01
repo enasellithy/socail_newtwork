@@ -8,7 +8,7 @@ jobs:
   ai_review:
     runs-on: ubuntu-latest
     permissions:
-      contents: write       # دي أهم واحدة عشان يقدر يكتب الكومنت على الـ Commit
+      contents: write
       pull-requests: write
       statuses: write
 
@@ -23,6 +23,11 @@ jobs:
         with:
           python-version: '3.10'
 
+      # الخطوة دي كانت ناقصة عندك المرة اللي فاتت 👇
+      - name: Install AI Library
+        run: |
+          pip install google-generativeai requests
+
       - name: Run AI Review & Test Generation
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -32,7 +37,7 @@ jobs:
         run: |
           FILE_PATH=$(find . -name "ai_agent.py" | head -n 1)
           if [ -z "$FILE_PATH" ]; then
-            echo "Error: ai_agent.py not found in the repository!"
+            echo "Error: ai_agent.py not found!"
             exit 1
           fi
           python "$FILE_PATH"
