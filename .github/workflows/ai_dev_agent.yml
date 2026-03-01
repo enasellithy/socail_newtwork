@@ -18,7 +18,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11' # حدثنا النسخة لتجنب التحذيرات
+          python-version: '3.11' 
 
       - name: Install Dependencies
         run: pip install openai requests
@@ -33,8 +33,9 @@ jobs:
           FILE_PATH=$(find . -name "ai_agent.py" | head -n 1)
           python "$FILE_PATH"
 
-      - name: Upload Review File
+      - name: Upload AI Review Artifact
+        if: always() # عشان يرفع الملف حتى لو فيه تحذيرات
         uses: actions/upload-artifact@v4
         with:
-          name: ai-code-review
+          name: laravel-ai-review
           path: ai_review.md
