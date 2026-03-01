@@ -2,23 +2,21 @@ name: Laravel AI Dev Agent
 
 on:
   push:
-    branches: [ "main", "master", "dev" ] # بيشتغل لما ترفع على الفروع دي
-
+    branches: [ "main", "master", "dev" ]
 
 jobs:
   ai_review:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write       # دي أهم واحدة عشان يقدر يكتب الكومنت على الـ Commit
       pull-requests: write
-      repository-projects: write
       statuses: write
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2 # عشان يحسب الفرق بين آخر commit واللي قبله
+          fetch-depth: 2 
 
       - name: Set up Python
         uses: actions/setup-python@v4
