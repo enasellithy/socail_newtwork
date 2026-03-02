@@ -2,12 +2,15 @@ name: Groq Issue Solver - All Issues
 
 on:
   schedule:
-    # Run every hour (adjust as needed)
     - cron: '0 * * * *'
   workflow_dispatch:
-    # Manual trigger
   issues:
     types: [opened, labeled]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
 
 jobs:
   solve-all-issues:
@@ -27,13 +30,13 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: |
-          pip install openai PyGithub gitpython
+        run: pip install openai PyGithub gitpython
 
       - name: Solve all open issues with Groq
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_NAME: ${{ github.repository }}
         run: |
           python << 'EOF'
           import os
@@ -41,182 +44,105 @@ jobs:
           from github import Github
           import git
           import re
+          import time
 
-          # Setup Groq client
           client = openai.OpenAI(
               api_key=os.environ['GROQ_API_KEY'],
               base_url="https://api.groq.com/openai/v1"
           )
 
-          # Connect to GitHub
           g = Github(os.environ['GITHUB_TOKEN'])
-          repo = g.get_repo("${{ github.repository }}")
+          repo = g.get_repo(os.environ['REPO_NAME'])
           repo_local = git.Repo(".")
 
-          # Get all open issues (excluding pull requests)
           open_issues = [issue for issue in repo.get_issues(state='open') if not issue.pull_request]
           
           if not open_issues:
               print("No open issues found!")
               exit(0)
 
-          print(f"Found {len(open_issues)} open issues to solve")
-
-          # Process each issue
           for issue in open_issues:
               issue_number = issue.number
-              print(f"\n{'='*50}")
-              print(f"Processing Issue #{issue_number}: {issue.title}")
-              print(f"{'='*50}")
-
-              # Check if already has a branch/PR
               branch_name = f"ai-fix-issue-{issue_number}"
+              
               try:
                   repo.get_branch(branch_name)
-                  print(f"Branch {branch_name} already exists, skipping...")
                   continue
               except:
                   pass
 
-              # Get PHP files
               php_files = []
-              for root, dirs, files in os.walk("app"):
+              for root, _, files in os.walk("."):
+                  if "vendor" in root or "node_modules" in root or ".git" in root:
+                      continue
                   for file in files:
                       if file.endswith(".php"):
                           php_files.append(os.path.join(root, file))
 
-              # Read files content
               files_content = ""
-              for pf in php_files[:8]:
+              for pf in php_files[:15]:
                   try:
                       with open(pf, 'r') as f:
-                          content = f.read()
-                          files_content += f"\n=== {pf} ===\n{content[:1200]}\n"
+                          files_content += f"\n--- {pf} ---\n{f.read()[:1500]}\n"
                   except:
                       pass
 
-              # Generate solution based on issue type
-              if "test" in issue.title.lower() or "unit test" in issue.body.lower():
-                  prompt = f"""
-                  Generate PHPUnit tests for Laravel issue:
-
-                  **Issue #{issue_number}:** {issue.title}
-                  **Description:** {issue.body}
-
-                  **Files:**
-                  {files_content}
-
-                  Create tests in tests/Unit/ matching app/ structure.
-                  Include edge cases and mocks.
-
-                  Output format:
-                  ```php
-                  // tests/Unit/Path/To/ClassTest.php
-                  <?php
-                  // test code
-                  ```
-                  """
-              else:
-                  prompt = f"""
-                  Solve this GitHub issue for Laravel:
-
-                  **Issue #{issue_number}:** {issue.title}
-                  **Description:** {issue.body}
-
-                  **Files:**
-                  {files_content}
-
-                  Provide the complete solution with file paths.
-
-                  Output format:
-                  ```php
-                  // filepath.php
-                  <?php
-                  // code
-                  ```
-                  """
+              prompt = f"Solve Issue #{issue_number}: {issue.title}\nDesc: {issue.body}\n\nFiles:\n{files_content}\n\nOutput only files in this format:\n// path/file.php\n```php\n<?php ...\n```"
 
               try:
                   response = client.chat.completions.create(
                       model="llama-3.3-70b-versatile",
                       messages=[
-                          {"role": "system", "content": "You are a Laravel expert."},
+                          {"role": "system", "content": "You are a Laravel expert. Output full file content for each modified file."},
                           {"role": "user", "content": prompt}
                       ],
-                      temperature=0.2,
-                      max_tokens=6000
+                      temperature=0.1
                   )
 
-                  generated_content = response.choices[0].message.content
-
-                  # Extract code blocks
-                  pattern = r'//\s*([^\n]+)\s*```php\s*(.*?)\s*```'
-                  matches = re.findall(pattern, generated_content, re.DOTALL)
+                  generated = response.choices[0].message.content
+                  matches = re.findall(r'//\s*([^\n]+)\s*```php\s*(.*?)\s*```', generated, re.DOTALL)
 
                   if not matches:
-                      pattern = r'```php\s*(//\s*([^\n]+))?(.*?)\s*```'
-                      raw_matches = re.findall(pattern, generated_content, re.DOTALL)
-                      matches = [(m[1] if m[1] else f"fix_{i}.php", m[2]) for i, m in enumerate(raw_matches)]
-
-                  if not matches:
-                      print(f"No solution generated for issue #{issue_number}")
                       continue
 
-                  # Create branch
-                  current = repo_local.create_head(branch_name)
-                  current.checkout()
+                  new_branch = repo_local.create_head(branch_name)
+                  new_branch.checkout()
 
-                  # Create files
                   created_files = []
                   for filepath, code in matches:
                       filepath = filepath.strip()
-                      if not filepath.endswith('.php'):
-                          filepath += '.php'
-                      
-                      # Ensure tests/Unit/ for test issues
-                      if "test" in issue.title.lower() and not filepath.startswith('tests/'):
-                          filepath = f"tests/Unit/{filepath}"
-                      
                       os.makedirs(os.path.dirname(filepath), exist_ok=True)
-                      
-                      code = code.strip()
-                      if not code.startswith('<?php'):
-                          code = '<?php\n\n' + code
-                      
                       with open(filepath, 'w') as f:
-                          f.write(code)
-                      
+                          f.write(code.strip())
                       created_files.append(filepath)
-                      print(f"Created: {filepath}")
 
-                  # Commit and push
-                  repo_local.config_writer().set_value("user", "name", "AI Developer").release()
-                  repo_local.config_writer().set_value("user", "email", "ai@example.com").release()
+                  repo_local.config_writer().set_value("user", "name", "AI Fixer").release()
+                  repo_local.config_writer().set_value("user", "email", "ai@fix.com").release()
                   
                   repo_local.git.add(A=True)
-                  repo_local.git.commit("-m", f"AI fix for issue #{issue_number}: {issue.title}")
-                  repo_local.git.push("--set-upstream", "origin", branch_name)
+                  repo_local.git.commit("-m", f"AI fix for #{issue_number}")
+                  
+                  auth_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['REPO_NAME']}.git"
+                  if 'origin_auth' not in [r.name for r in repo_local.remotes]:
+                      remote = repo_local.create_remote('origin_auth', auth_url)
+                  else:
+                      remote = repo_local.remote('origin_auth')
+                  
+                  remote.push(refspec=f"{branch_name}:{branch_name}")
 
-                  # Create PR
                   pr = repo.create_pull(
                       title=f"🤖 Fix #{issue_number}: {issue.title}",
-                      body=f"AI-generated solution\n\nFiles changed:\n" + 
-                           "\n".join([f"- `{f}`" for f in created_files]) +
-                           f"\n\nCloses #{issue_number}",
+                      body=f"AI generated fix for #{issue_number}",
                       head=branch_name,
-                      base="main"
+                      base=repo.default_branch
                   )
+                  issue.create_comment(f"✅ AI solution in PR #{pr.number}")
                   
-                  print(f"✅ Created PR #{pr.number}: {pr.html_url}")
-                  issue.create_comment(f"🤖 AI solution generated in PR #{pr.number}")
-
-                  # Go back to main for next issue
-                  repo_local.heads.main.checkout()
+                  repo_local.heads[repo.default_branch].checkout()
+                  time.sleep(5)
 
               except Exception as e:
-                  print(f"❌ Error processing issue #{issue_number}: {str(e)}")
+                  print(f"Error #{issue_number}: {e}")
+                  repo_local.git.checkout(repo.default_branch)
                   continue
-
-          print(f"\n{'='*50}")
-          print("Finished processing all open issues")
           EOF
