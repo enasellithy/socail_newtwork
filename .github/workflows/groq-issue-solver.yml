@@ -41,7 +41,6 @@ jobs:
           from github import Github
           import git
           import re
-          import json
 
           # Setup Groq client (OpenAI compatible)
           client = openai.OpenAI(
@@ -81,7 +80,6 @@ jobs:
               try:
                   with open(pf, 'r') as f:
                       content = f.read()
-                      # Limit content length per file
                       files_content += f"\n\n=== FILE: {pf} ===\n{content[:1500]}\n"
               except Exception as e:
                   print(f"⚠️ Error reading {pf}: {e}")
@@ -142,7 +140,6 @@ jobs:
           print(f"✅ Received {len(generated_content)} characters from Groq")
 
           # Extract PHP code blocks with file paths
-          # Pattern: // tests/Unit/... followed by ```php ... ```
           pattern = r'//\s*(tests/Unit/[^\n]+)\s*```php\s*(.*?)\s*```'
           matches = re.findall(pattern, generated_content, re.DOTALL)
 
