@@ -1,4 +1,4 @@
-name: Groq Issue Solver - All Issues
+name: Groq Auto Issue Solver
 
 on:
   schedule:
@@ -13,38 +13,34 @@ permissions:
   issues: write
 
 jobs:
-  solve-all-issues:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.label.name, 'ai-fix') || contains(github.event.label.name, 'groq')
+  solve-issues:
     runs-on: ubuntu-latest
+    if: github.event_name != 'issues' || contains(github.event.label.name, 'ai-fix')
     
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Python
+      - name: Python Setup
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: pip install openai PyGithub gitpython
 
-      - name: Solve all open issues with Groq
+      - name: Run Solver
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO_NAME: ${{ github.repository }}
         run: |
           python << 'EOF'
-          import os
-          import openai
+          import os, openai, git, re, time
           from github import Github
-          import git
-          import re
-          import time
 
           client = openai.OpenAI(
               api_key=os.environ['GROQ_API_KEY'],
@@ -54,16 +50,12 @@ jobs:
           g = Github(os.environ['GITHUB_TOKEN'])
           repo = g.get_repo(os.environ['REPO_NAME'])
           repo_local = git.Repo(".")
+          default_branch = repo.default_branch
 
-          open_issues = [issue for issue in repo.get_issues(state='open') if not issue.pull_request]
-          
-          if not open_issues:
-              print("No open issues found!")
-              exit(0)
+          open_issues = [i for i in repo.get_issues(state='open') if not i.pull_request]
 
           for issue in open_issues:
-              issue_number = issue.number
-              branch_name = f"ai-fix-issue-{issue_number}"
+              branch_name = f"fix/issue-{issue.number}"
               
               try:
                   repo.get_branch(branch_name)
@@ -71,56 +63,49 @@ jobs:
               except:
                   pass
 
-              php_files = []
+              repo_local.git.checkout(default_branch)
+              
+              files_context = ""
               for root, _, files in os.walk("."):
-                  if "vendor" in root or "node_modules" in root or ".git" in root:
-                      continue
+                  if any(x in root for x in ["vendor", "node_modules", ".git", "tests"]): continue
                   for file in files:
-                      if file.endswith(".php"):
-                          php_files.append(os.path.join(root, file))
+                      if file.endswith(".php") or file.endswith(".json"):
+                          path = os.path.join(root, file)
+                          try:
+                              with open(path, 'r') as f:
+                                  files_context += f"\n-- {path} --\n{f.read()[:1000]}\n"
+                          except: pass
 
-              files_content = ""
-              for pf in php_files[:15]:
-                  try:
-                      with open(pf, 'r') as f:
-                          files_content += f"\n--- {pf} ---\n{f.read()[:1500]}\n"
-                  except:
-                      pass
-
-              prompt = f"Solve Issue #{issue_number}: {issue.title}\nDesc: {issue.body}\n\nFiles:\n{files_content}\n\nOutput only files in this format:\n// path/file.php\n```php\n<?php ...\n```"
+              prompt = f"Issue #{issue.number}: {issue.title}\n{issue.body}\nContext:\n{files_context}\nReturn files in format:\n// path/file.php\n```php\nCODE\n```"
 
               try:
                   response = client.chat.completions.create(
                       model="llama-3.3-70b-versatile",
                       messages=[
-                          {"role": "system", "content": "You are a Laravel expert. Output full file content for each modified file."},
+                          {"role": "system", "content": "You are a Laravel expert. Fix the issue and provide full file contents."},
                           {"role": "user", "content": prompt}
-                      ],
-                      temperature=0.1
+                      ]
                   )
 
-                  generated = response.choices[0].message.content
-                  matches = re.findall(r'//\s*([^\n]+)\s*```php\s*(.*?)\s*```', generated, re.DOTALL)
+                  content = response.choices[0].message.content
+                  matches = re.findall(r'//\s*([^\n]+)\s*```(?:php)?\s*(.*?)\s*```', content, re.DOTALL)
 
-                  if not matches:
-                      continue
+                  if not matches: continue
 
                   new_branch = repo_local.create_head(branch_name)
                   new_branch.checkout()
 
-                  created_files = []
-                  for filepath, code in matches:
-                      filepath = filepath.strip()
-                      os.makedirs(os.path.dirname(filepath), exist_ok=True)
-                      with open(filepath, 'w') as f:
+                  for path, code in matches:
+                      path = path.strip()
+                      os.makedirs(os.path.dirname(path), exist_ok=True)
+                      with open(path, 'w') as f:
                           f.write(code.strip())
-                      created_files.append(filepath)
 
-                  repo_local.config_writer().set_value("user", "name", "AI Fixer").release()
-                  repo_local.config_writer().set_value("user", "email", "ai@fix.com").release()
+                  repo_local.config_writer().set_value("user", "name", "AI Bot").release()
+                  repo_local.config_writer().set_value("user", "email", "bot@ai.com").release()
                   
                   repo_local.git.add(A=True)
-                  repo_local.git.commit("-m", f"AI fix for #{issue_number}")
+                  repo_local.git.commit("-m", f"Fix issue #{issue.number}")
                   
                   auth_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['REPO_NAME']}.git"
                   if 'origin_auth' not in [r.name for r in repo_local.remotes]:
@@ -132,17 +117,14 @@ jobs:
 
                   pr = repo.create_pull(
                       title=f"🤖 Fix #{issue_number}: {issue.title}",
-                      body=f"AI generated fix for #{issue_number}",
+                      body=f"This PR automatically fixes #{issue.number}.\n\nCloses #{issue.number}",
                       head=branch_name,
-                      base=repo.default_branch
+                      base=default_branch
                   )
-                  issue.create_comment(f"✅ AI solution in PR #{pr.number}")
                   
-                  repo_local.heads[repo.default_branch].checkout()
-                  time.sleep(5)
+                  print(f"Created PR #{pr.number}")
+                  time.sleep(10)
 
               except Exception as e:
-                  print(f"Error #{issue_number}: {e}")
-                  repo_local.git.checkout(repo.default_branch)
-                  continue
+                  print(f"Error on #{issue.number}: {e}")
           EOF
