@@ -1,24 +1,21 @@
-<?php
-
-namespace App\Providers;
-
-use Illuminate\Support\ServiceProvider;
-
+// Before
 class AppServiceProvider extends ServiceProvider
 {
-    /**
-     * Register any application services.
-     */
-    public function register(): void
+    public function boot()
     {
-        //
+        $collection = collect([1, 2, 3]);
+        $filteredCollection = $collection->filter(function ($item) {
+            return $item > 1;
+        });
     }
+}
 
-    /**
-     * Bootstrap any application services.
-     */
-    public function boot(): void
+// After
+class AppServiceProvider extends ServiceProvider
+{
+    public function boot()
     {
-        //
+        $collection = collect([1, 2, 3]);
+        $filteredCollection = $collection->filter(fn ($item) => $item > 1);
     }
 }
