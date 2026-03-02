@@ -1,4 +1,4 @@
-name: Groq Auto Solver - Final Logic Fix
+name: Groq Auto Solver - Fixed Auth
 
 on:
   push:
@@ -38,10 +38,12 @@ jobs:
         run: |
           python << 'EOF'
           import os, openai, git, re, time
-          from github import Github
+          from github import Github, Auth
 
+          auth = Auth.Token(os.environ['GITHUB_TOKEN'])
+          g = Github(auth=auth)
           client = openai.OpenAI(api_key=os.environ['GROQ_API_KEY'], base_url="https://api.groq.com/openai/v1")
-          g = Github(os.environ['GITHUB_TOKEN'])
+          
           repo = g.get_repo(os.environ['REPO_NAME'])
           repo_local = git.Repo(".")
           default_branch = repo.default_branch
@@ -76,7 +78,7 @@ jobs:
               try:
                   response = client.chat.completions.create(
                       model="llama-3.3-70b-versatile",
-                      messages=[{"role": "system", "content": "Expert developer. Always provide full file paths and content."},
+                      messages=[{"role": "system", "content": "Expert developer. Provide full file paths and content."},
                                 {"role": "user", "content": prompt}]
                   )
                   
@@ -85,7 +87,6 @@ jobs:
 
                   if not matches:
                       repo_local.git.checkout(default_branch)
-                      repo_local.delete_head(branch_name, force=True)
                       continue
 
                   for path, code in matches:
@@ -116,6 +117,6 @@ jobs:
                   
                   repo_local.git.checkout(default_branch)
                   
-              except Exception as e:
+              except Exception:
                   repo_local.git.checkout(default_branch)
           EOF
