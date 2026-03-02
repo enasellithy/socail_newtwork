@@ -1,10 +1,8 @@
-name: Groq Auto Solver - Immediate Execution
+name: Groq Auto Solver - Strict Branching & PR
 
 on:
   push:
-    branches:
-      - main
-      - master
+    branches: [main, master]
   issues:
     types: [opened]
   workflow_dispatch:
@@ -46,21 +44,28 @@ jobs:
           g = Github(os.environ['GITHUB_TOKEN'])
           repo = g.get_repo(os.environ['REPO_NAME'])
           repo_local = git.Repo(".")
-          
+          default_branch = repo.default_branch
+
           issues = [i for i in repo.get_issues(state='open') if not i.pull_request]
-          print(f"Found {len(issues)} open issues.")
 
           for issue in issues:
               branch_name = f"fix/issue-{issue.number}"
               
+              # التأكد من عدم وجود الفرع مسبقاً لتجنب التكرار
               try:
                   repo.get_branch(branch_name)
-                  print(f"Skipping Issue #{issue.number}: Branch already exists.")
                   continue
               except: pass
 
-              print(f"Processing Issue #{issue.number}...")
+              # 1. تنظيف بيئة Git والعودة للفرع الرئيسي قبل كل Issue
+              repo_local.git.reset('--hard')
+              repo_local.git.clean('-fd')
+              repo_local.git.checkout(default_branch)
               
+              # 2. إنشاء فرع جديد ومستقل لهذه المشكلة تحديداً
+              repo_local.git.checkout('-b', branch_name)
+
+              # جمع الكود
               context = ""
               for root, _, files in os.walk("."):
                   if any(d in root for d in ["vendor", "node_modules", ".git"]): continue
@@ -84,18 +89,16 @@ jobs:
                   matches = re.findall(r"(?:FILEPATH|File):\s*([^\n\s]+).*?```(?:\w+)?\s*(.*?)\s*```", output, re.DOTALL | re.IGNORECASE)
 
                   if not matches:
-                      print(f"No code found for Issue #{issue.number}")
                       continue
-
-                  repo_local.git.checkout(repo.default_branch)
-                  repo_local.git.checkout('-b', branch_name)
                   
+                  # كتابة الملفات الجديدة
                   for path, code in matches:
                       path = path.strip().replace(":", "")
                       os.makedirs(os.path.dirname(path), exist_ok=True)
                       with open(path, 'w') as f:
                           f.write(code.strip())
 
+                  # 3. الحفظ والرفع (Commit & Push) للفرع الجديد
                   repo_local.config_writer().set_value("user", "name", "AI Solver").release()
                   repo_local.config_writer().set_value("user", "email", "bot@ai.com").release()
                   repo_local.git.add(A=True)
@@ -108,21 +111,24 @@ jobs:
                   
                   origin.push(branch_name)
 
+                  # 4. إنشاء Pull Request خاص بهذا الفرع
                   pr = repo.create_pull(
-                      title=f"🤖 AI Fix: {issue.title}",
-                      body=f"Auto-generated fix for #{issue.number}.\n\nCloses #{issue.number}",
+                      title=f"🤖 Fix for Issue #{issue.number}",
+                      body=f"This PR was generated automatically.\n\nCloses #{issue.number}",
                       head=branch_name,
-                      base=repo.default_branch
+                      base=default_branch
                   )
-                  issue.create_comment(f"✅ AI PR created: {pr.html_url}")
-                  print(f"PR Created: {pr.html_url}")
-
-                  repo_local.git.checkout(repo.default_branch)
+                  
+                  print(f"✅ Created Branch & PR {pr.html_url} for Issue #{issue.number}")
+                  
+                  # العودة للفرع الرئيسي استعداداً للمشكلة التالية
+                  repo_local.git.checkout(default_branch)
                   time.sleep(5)
                   
               except Exception as e:
-                  print(f"Error: {e}")
-                  repo_local.git.checkout(repo.default_branch)
+                  print(f"Error on issue #{issue.number}: {e}")
+                  # في حال حدوث خطأ، نضمن العودة للفرع الرئيسي
+                  repo_local.git.reset('--hard')
+                  repo_local.git.checkout(default_branch)
 
-          print("Done.")
           EOF
