@@ -1,5 +1,6 @@
+// Remove or comment out the line that includes the 'files' provider
 'providers' => [
     // ...
-    App\Providers\AppServiceProvider::class,
+    // App\Providers\FilesServiceProvider::class, // Remove or comment out this line
     // ...
 ],
