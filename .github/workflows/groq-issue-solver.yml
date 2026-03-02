@@ -1,17 +1,17 @@
-name: Groq Issue Solver
+name: Groq Issue Solver - All Issues
 
 on:
-  issues:
-    types: [labeled, opened]
+  schedule:
+    # Run every hour (adjust as needed)
+    - cron: '0 * * * *'
   workflow_dispatch:
-    inputs:
-      issue_number:
-        description: 'Issue number to solve'
-        required: true
+    # Manual trigger
+  issues:
+    types: [opened, labeled]
 
 jobs:
-  solve-issue:
-    if: contains(github.event.label.name, 'ai-fix') || contains(github.event.label.name, 'groq') || github.event_name == 'workflow_dispatch'
+  solve-all-issues:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || contains(github.event.label.name, 'ai-fix') || contains(github.event.label.name, 'groq')
     runs-on: ubuntu-latest
     
     steps:
@@ -30,7 +30,7 @@ jobs:
         run: |
           pip install openai PyGithub gitpython
 
-      - name: Solve issue with Groq
+      - name: Solve all open issues with Groq
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -42,7 +42,7 @@ jobs:
           import git
           import re
 
-          # Setup Groq client (OpenAI compatible)
+          # Setup Groq client
           client = openai.OpenAI(
               api_key=os.environ['GROQ_API_KEY'],
               base_url="https://api.groq.com/openai/v1"
@@ -51,131 +51,172 @@ jobs:
           # Connect to GitHub
           g = Github(os.environ['GITHUB_TOKEN'])
           repo = g.get_repo("${{ github.repository }}")
-          
-          # Get issue number
-          if "${{ github.event_name }}" == "workflow_dispatch":
-              issue_number = int("${{ github.event.inputs.issue_number }}")
-          else:
-              issue_number = ${{ github.event.issue.number }}
-          
-          issue = repo.get_issue(number=issue_number)
-          
-          print(f"Processing Issue #{issue_number}: {issue.title}")
-
-          # Get repository PHP files
           repo_local = git.Repo(".")
-          php_files = []
-          for root, dirs, files in os.walk("app"):
-              for file in files:
-                  if file.endswith(".php"):
-                      php_files.append(os.path.join(root, file))
+
+          # Get all open issues (excluding pull requests)
+          open_issues = [issue for issue in repo.get_issues(state='open') if not issue.pull_request]
           
-          print(f"Found {len(php_files)} PHP files")
+          if not open_issues:
+              print("No open issues found!")
+              exit(0)
 
-          # Read file contents
-          files_content = ""
-          for pf in php_files[:10]:
+          print(f"Found {len(open_issues)} open issues to solve")
+
+          # Process each issue
+          for issue in open_issues:
+              issue_number = issue.number
+              print(f"\n{'='*50}")
+              print(f"Processing Issue #{issue_number}: {issue.title}")
+              print(f"{'='*50}")
+
+              # Check if already has a branch/PR
+              branch_name = f"ai-fix-issue-{issue_number}"
               try:
-                  with open(pf, 'r') as f:
-                      content = f.read()
-                      files_content += f"\n\n=== {pf} ===\n{content[:1500]}\n"
+                  repo.get_branch(branch_name)
+                  print(f"Branch {branch_name} already exists, skipping...")
+                  continue
+              except:
+                  pass
+
+              # Get PHP files
+              php_files = []
+              for root, dirs, files in os.walk("app"):
+                  for file in files:
+                      if file.endswith(".php"):
+                          php_files.append(os.path.join(root, file))
+
+              # Read files content
+              files_content = ""
+              for pf in php_files[:8]:
+                  try:
+                      with open(pf, 'r') as f:
+                          content = f.read()
+                          files_content += f"\n=== {pf} ===\n{content[:1200]}\n"
+                  except:
+                      pass
+
+              # Generate solution based on issue type
+              if "test" in issue.title.lower() or "unit test" in issue.body.lower():
+                  prompt = f"""
+                  Generate PHPUnit tests for Laravel issue:
+
+                  **Issue #{issue_number}:** {issue.title}
+                  **Description:** {issue.body}
+
+                  **Files:**
+                  {files_content}
+
+                  Create tests in tests/Unit/ matching app/ structure.
+                  Include edge cases and mocks.
+
+                  Output format:
+                  ```php
+                  // tests/Unit/Path/To/ClassTest.php
+                  <?php
+                  // test code
+                  ```
+                  """
+              else:
+                  prompt = f"""
+                  Solve this GitHub issue for Laravel:
+
+                  **Issue #{issue_number}:** {issue.title}
+                  **Description:** {issue.body}
+
+                  **Files:**
+                  {files_content}
+
+                  Provide the complete solution with file paths.
+
+                  Output format:
+                  ```php
+                  // filepath.php
+                  <?php
+                  // code
+                  ```
+                  """
+
+              try:
+                  response = client.chat.completions.create(
+                      model="llama-3.3-70b-versatile",
+                      messages=[
+                          {"role": "system", "content": "You are a Laravel expert."},
+                          {"role": "user", "content": prompt}
+                      ],
+                      temperature=0.2,
+                      max_tokens=6000
+                  )
+
+                  generated_content = response.choices[0].message.content
+
+                  # Extract code blocks
+                  pattern = r'//\s*([^\n]+)\s*```php\s*(.*?)\s*```'
+                  matches = re.findall(pattern, generated_content, re.DOTALL)
+
+                  if not matches:
+                      pattern = r'```php\s*(//\s*([^\n]+))?(.*?)\s*```'
+                      raw_matches = re.findall(pattern, generated_content, re.DOTALL)
+                      matches = [(m[1] if m[1] else f"fix_{i}.php", m[2]) for i, m in enumerate(raw_matches)]
+
+                  if not matches:
+                      print(f"No solution generated for issue #{issue_number}")
+                      continue
+
+                  # Create branch
+                  current = repo_local.create_head(branch_name)
+                  current.checkout()
+
+                  # Create files
+                  created_files = []
+                  for filepath, code in matches:
+                      filepath = filepath.strip()
+                      if not filepath.endswith('.php'):
+                          filepath += '.php'
+                      
+                      # Ensure tests/Unit/ for test issues
+                      if "test" in issue.title.lower() and not filepath.startswith('tests/'):
+                          filepath = f"tests/Unit/{filepath}"
+                      
+                      os.makedirs(os.path.dirname(filepath), exist_ok=True)
+                      
+                      code = code.strip()
+                      if not code.startswith('<?php'):
+                          code = '<?php\n\n' + code
+                      
+                      with open(filepath, 'w') as f:
+                          f.write(code)
+                      
+                      created_files.append(filepath)
+                      print(f"Created: {filepath}")
+
+                  # Commit and push
+                  repo_local.config_writer().set_value("user", "name", "AI Developer").release()
+                  repo_local.config_writer().set_value("user", "email", "ai@example.com").release()
+                  
+                  repo_local.git.add(A=True)
+                  repo_local.git.commit("-m", f"AI fix for issue #{issue_number}: {issue.title}")
+                  repo_local.git.push("--set-upstream", "origin", branch_name)
+
+                  # Create PR
+                  pr = repo.create_pull(
+                      title=f"🤖 Fix #{issue_number}: {issue.title}",
+                      body=f"AI-generated solution\n\nFiles changed:\n" + 
+                           "\n".join([f"- `{f}`" for f in created_files]) +
+                           f"\n\nCloses #{issue_number}",
+                      head=branch_name,
+                      base="main"
+                  )
+                  
+                  print(f"✅ Created PR #{pr.number}: {pr.html_url}")
+                  issue.create_comment(f"🤖 AI solution generated in PR #{pr.number}")
+
+                  # Go back to main for next issue
+                  repo_local.heads.main.checkout()
+
               except Exception as e:
-                  print(f"Error reading {pf}: {e}")
+                  print(f"❌ Error processing issue #{issue_number}: {str(e)}")
+                  continue
 
-          # Generate solution with Groq
-          prompt = f"""
-          Generate PHPUnit tests for this Laravel issue:
-
-          **Issue:** {issue.title}
-          **Description:** {issue.body}
-
-          **Files:**
-          {files_content}
-
-          **Requirements:**
-          1. Create tests in tests/Unit/ matching app/ structure
-          2. Include edge cases
-          3. Mock external services
-          4. Follow Laravel testing best practices
-
-          **Output format:**
-          ```php
-          // tests/Unit/Path/To/ClassTest.php
-          <?php
-          // test code here
-          ```
-          """
-
-          response = client.chat.completions.create(
-              model="llama-3.3-70b-versatile",
-              messages=[
-                  {"role": "system", "content": "You are a Laravel testing expert."},
-                  {"role": "user", "content": prompt}
-              ],
-              temperature=0.2,
-              max_tokens=8000
-          )
-
-          generated_content = response.choices[0].message.content
-
-          # Extract PHP code blocks
-          pattern = r'//\s*(tests/Unit/[^\n]+)\s*```php\s*(.*?)\s*```'
-          matches = re.findall(pattern, generated_content, re.DOTALL)
-
-          if not matches:
-              pattern = r'```php\s*(//\s*tests/Unit/[^\n]+)?(.*?)\s*```'
-              matches = re.findall(pattern, generated_content, re.DOTALL)
-              matches = [(m[0].strip('// ') if m[0] else f"tests/Unit/Test{i}.php", m[1]) 
-                        for i, m in enumerate(matches) if 'class' in m[1]]
-
-          if not matches:
-              print("No test files found!")
-              exit(1)
-
-          # Create branch
-          branch_name = f"ai-fix-issue-{issue_number}"
-          current = repo_local.create_head(branch_name)
-          current.checkout()
-          print(f"Created branch: {branch_name}")
-
-          # Create test files
-          created_files = []
-          for filepath, code in matches:
-              filepath = filepath.strip()
-              if not filepath.endswith('.php'):
-                  filepath += '.php'
-              
-              os.makedirs(os.path.dirname(filepath), exist_ok=True)
-              
-              code = code.strip()
-              if not code.startswith('<?php'):
-                  code = '<?php\n\n' + code
-              
-              with open(filepath, 'w') as f:
-                  f.write(code)
-              
-              created_files.append(filepath)
-              print(f"Created: {filepath}")
-
-          # Configure git and push
-          repo_local.config_writer().set_value("user", "name", "AI Developer").release()
-          repo_local.config_writer().set_value("user", "email", "ai@example.com").release()
-
-          if created_files:
-              repo_local.git.add(A=True)
-              repo_local.git.commit("-m", f"AI-generated tests for issue #{issue_number}")
-              repo_local.git.push("--set-upstream", "origin", branch_name)
-
-              # Create PR
-              pr = repo.create_pull(
-                  title=f"Resolve #{issue_number}: {issue.title}",
-                  body=f"AI-generated solution for issue #{issue_number}\n\nChanges:\n" + 
-                       "\n".join([f"- `{f}`" for f in created_files]) +
-                       f"\n\nCloses #{issue_number}",
-                  head=branch_name,
-                  base="main"
-              )
-              
-              print(f"Created PR: {pr.html_url}")
-              issue.create_comment(f"AI solution generated in PR #{pr.number}")
+          print(f"\n{'='*50}")
+          print("Finished processing all open issues")
           EOF
