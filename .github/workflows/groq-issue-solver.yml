@@ -1,4 +1,4 @@
-name: Groq Auto Issue Solver
+name: Groq Auto Solver - Fixed Version
 
 on:
   schedule:
@@ -15,16 +15,14 @@ permissions:
 jobs:
   solve-issues:
     runs-on: ubuntu-latest
-    if: github.event_name != 'issues' || contains(github.event.label.name, 'ai-fix')
-    
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Python Setup
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
@@ -32,99 +30,98 @@ jobs:
       - name: Install Dependencies
         run: pip install openai PyGithub gitpython
 
-      - name: Run Solver
+      - name: Run AI Solver
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO_NAME: ${{ github.repository }}
         run: |
           python << 'EOF'
           import os, openai, git, re, time
           from github import Github
 
-          client = openai.OpenAI(
-              api_key=os.environ['GROQ_API_KEY'],
-              base_url="https://api.groq.com/openai/v1"
-          )
-
+          # 1. إعدادات الاتصال
+          client = openai.OpenAI(api_key=os.environ['GROQ_API_KEY'], base_url="https://api.groq.com/openai/v1")
           g = Github(os.environ['GITHUB_TOKEN'])
-          repo = g.get_repo(os.environ['REPO_NAME'])
+          repo = g.get_repo(os.environ.get('GITHUB_REPOSITORY'))
           repo_local = git.Repo(".")
-          default_branch = repo.default_branch
+          
+          # 2. جلب المشاكل المفتوحة
+          issues = [i for i in repo.get_issues(state='open') if not i.pull_request]
+          print(f"Found {len(issues)} open issues.")
 
-          open_issues = [i for i in repo.get_issues(state='open') if not i.pull_request]
-
-          for issue in open_issues:
+          for issue in issues:
               branch_name = f"fix/issue-{issue.number}"
+              print(f"--- Processing Issue #{issue.number}: {issue.title} ---")
               
+              # تجنب التكرار
               try:
                   repo.get_branch(branch_name)
+                  print(f"Branch {branch_name} already exists. Skipping.")
                   continue
-              except:
-                  pass
+              except: pass
 
-              repo_local.git.checkout(default_branch)
-              
-              files_context = ""
+              # 3. جمع سياق الكود (أهم الملفات فقط لتوفير التوكنز)
+              context = ""
               for root, _, files in os.walk("."):
-                  if any(x in root for x in ["vendor", "node_modules", ".git", "tests"]): continue
-                  for file in files:
-                      if file.endswith(".php") or file.endswith(".json"):
-                          path = os.path.join(root, file)
-                          try:
-                              with open(path, 'r') as f:
-                                  files_context += f"\n-- {path} --\n{f.read()[:1000]}\n"
-                          except: pass
+                  if any(d in root for d in ["vendor", "node_modules", ".git"]): continue
+                  for f in files:
+                      if f.endswith((".php", ".js", ".json")):
+                          p = os.path.join(root, f)
+                          with open(p, 'r') as file_content:
+                              context += f"\nFile: {p}\nContent:\n{file_content.read()[:800]}\n"
 
-              prompt = f"Issue #{issue.number}: {issue.title}\n{issue.body}\nContext:\n{files_context}\nReturn files in format:\n// path/file.php\n```php\nCODE\n```"
+              # 4. طلب الحل من AI (بصيغة أكثر صرامة)
+              prompt = f"Fix this GitHub issue: {issue.title}\nDescription: {issue.body}\n\nFiles Context:\n{context}\n\nReturn the fix as: FILEPATH: path/to/file.php\nCODE: ```\ncode here\n```"
+              
+              response = client.chat.completions.create(
+                  model="llama-3.3-70b-versatile",
+                  messages=[{"role": "system", "content": "You are an expert dev. Always provide the full file path and code block."},
+                            {"role": "user", "content": prompt}]
+              )
+              
+              output = response.choices[0].message.content
+              # نمط استخراج المسار والكود بشكل أكثر مرونة
+              matches = re.findall(r"(?:FILEPATH|File):\s*([^\n\s]+).*?```(?:\w+)?\s*(.*?)\s*```", output, re.DOTALL | re.IGNORECASE)
 
-              try:
-                  response = client.chat.completions.create(
-                      model="llama-3.3-70b-versatile",
-                      messages=[
-                          {"role": "system", "content": "You are a Laravel expert. Fix the issue and provide full file contents."},
-                          {"role": "user", "content": prompt}
-                      ]
-                  )
+              if not matches:
+                  print("AI didn't return a clear fix format. Skipping.")
+                  continue
 
-                  content = response.choices[0].message.content
-                  matches = re.findall(r'//\s*([^\n]+)\s*```(?:php)?\s*(.*?)\s*```', content, re.DOTALL)
+              # 5. تطبيق التعديلات برمجياً
+              repo_local.git.checkout('HEAD', b=branch_name)
+              for path, code in matches:
+                  path = path.strip().replace(":", "")
+                  os.makedirs(os.path.dirname(path), exist_ok=True)
+                  with open(path, 'w') as f:
+                      f.write(code.strip())
+                  print(f"Updated file: {path}")
 
-                  if not matches: continue
+              # 6. الرفع (Push)
+              repo_local.config_writer().set_value("user", "name", "AI Solver").release()
+              repo_local.config_writer().set_value("user", "email", "ai@solver.com").release()
+              repo_local.git.add(A=True)
+              repo_local.git.commit("-m", f"Fix issue #{issue.number} via AI")
+              
+              remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
+              if 'origin_auth' not in [r.name for r in repo_local.remotes]:
+                  origin = repo_local.create_remote('origin_auth', remote_url)
+              else: origin = repo_local.remote('origin_auth')
+              
+              origin.push(branch_name)
 
-                  new_branch = repo_local.create_head(branch_name)
-                  new_branch.checkout()
-
-                  for path, code in matches:
-                      path = path.strip()
-                      os.makedirs(os.path.dirname(path), exist_ok=True)
-                      with open(path, 'w') as f:
-                          f.write(code.strip())
-
-                  repo_local.config_writer().set_value("user", "name", "AI Bot").release()
-                  repo_local.config_writer().set_value("user", "email", "bot@ai.com").release()
-                  
-                  repo_local.git.add(A=True)
-                  repo_local.git.commit("-m", f"Fix issue #{issue.number}")
-                  
-                  auth_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['REPO_NAME']}.git"
-                  if 'origin_auth' not in [r.name for r in repo_local.remotes]:
-                      remote = repo_local.create_remote('origin_auth', auth_url)
-                  else:
-                      remote = repo_local.remote('origin_auth')
-                  
-                  remote.push(refspec=f"{branch_name}:{branch_name}")
-
-                  pr = repo.create_pull(
-                      title=f"🤖 Fix #{issue_number}: {issue.title}",
-                      body=f"This PR automatically fixes #{issue.number}.\n\nCloses #{issue.number}",
-                      head=branch_name,
-                      base=default_branch
-                  )
-                  
-                  print(f"Created PR #{pr.number}")
-                  time.sleep(10)
-
-              except Exception as e:
-                  print(f"Error on #{issue.number}: {e}")
+              # 7. فتح الـ Pull Request مع كلمة الإغلاق التلقائي
+              pr = repo.create_pull(
+                  title=f"🤖 AI Fix: {issue.title}",
+                  body=f"This PR was generated by AI to fix issue #{issue.number}.\n\nCloses #{issue.number}",
+                  head=branch_name,
+                  base=repo.default_branch
+              )
+              print(f"Successfully created PR #{pr.number}")
+              
+              # تعليق على الـ Issue الأصلي
+              issue.create_comment(f"I've generated a potential fix in PR #{pr.number}. Once merged, this issue will close.")
+              
+              # العودة للفرع الرئيسي للمشكلة التالية
+              repo_local.git.checkout(repo.default_branch)
+              time.sleep(5) # لتجنب Rate Limit الخاص بـ Groq
           EOF
