@@ -1,36 +1,37 @@
-name: Groq Auto Solver - Fixed Logic
+name: Groq Auto Solver - Composer Fix
 
 on:
-  push:
-    branches: [main, master]
   issues:
-    types: [opened]
-  workflow_dispatch:
+    types: [opened, reopened]
 
 permissions:
   contents: write
   pull-requests: write
-  issues: write
 
 jobs:
   solve-issues:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4' # تأكدي أنها نفس النسخة المستهدفة
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Install Dependencies
+      - name: Install Python Dependencies
         run: pip install openai PyGithub gitpython
 
-      - name: Run AI Solver
+      - name: Run AI Solver with Composer Sync
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -40,92 +41,59 @@ jobs:
           import os, openai, git, re
           from github import Github, Auth
 
-          # 1. الاتصال بـ GitHub
-          print("--- Connecting to GitHub ---")
-          try:
-              auth = Auth.Token(os.environ['GITHUB_TOKEN'])
-              g = Github(auth=auth)
-              repo = g.get_repo(os.environ['REPO_NAME'])
-              print(f"Connected to: {repo.full_name}")
-          except Exception as e:
-              print(f"Error connecting: {e}")
-              exit(1)
-
-          # 2. جلب الـ Issues المفتوحة (التي ليست Pull Requests)
+          auth = Auth.Token(os.environ['GITHUB_TOKEN'])
+          g = Github(auth=auth)
+          repo = g.get_repo(os.environ['REPO_NAME'])
+          
           issues = [i for i in repo.get_issues(state='open') if not i.pull_request]
-          print(f"Total Open Issues Found: {len(issues)}")
-
-          if not issues:
-              print("No open issues to fix. Ending task.")
-              exit(0)
+          if not issues: exit(0)
 
           client = openai.OpenAI(api_key=os.environ['GROQ_API_KEY'], base_url="https://api.groq.com/openai/v1")
           repo_local = git.Repo(".")
-          default_branch = repo.default_branch
-
+          
           for issue in issues:
-              print(f"\nProcessing Issue #{issue.number}: {issue.title}")
-              branch_name = f"fix/issue-{issue.number}"
-              
-              # تجنب التكرار
-              try:
-                  repo.get_branch(branch_name)
-                  print(f"Branch {branch_name} already exists. Skipping.")
-                  continue
-              except: pass
-
-              # إنشاء الفرع
-              repo_local.git.checkout(default_branch)
+              branch_name = f"fix/composer-sync-{issue.number}"
+              repo_local.git.checkout(repo.default_branch)
               repo_local.git.checkout('-b', branch_name)
 
-              # طلب الحل من الذكاء الاصطناعي
-              prompt = f"Fix issue #{issue.number}: {issue.title}\n{issue.body}\nOutput format:\nFILEPATH: path/to/file\nCODE: ```\ncontent\n```"
+              # قراءة الملف الذي سبب المشكلة
+              with open("composer.json", "r") as f:
+                  composer_content = f.read()
+
+              prompt = f"Fix composer.json issue: {issue.body}\nCurrent content:\n{composer_content}\nOutput format:\nFILE: composer.json\nCODE: ```json\n(content)\n```"
+
+              response = client.chat.completions.create(
+                  model="llama-3.3-70b-versatile",
+                  messages=[{"role": "user", "content": prompt}]
+              )
               
-              try:
-                  response = client.chat.completions.create(
-                      model="llama-3.3-70b-versatile",
-                      messages=[{"role": "system", "content": "Professional developer. Provide full file paths and content."},
-                                {"role": "user", "content": prompt}]
-                  )
-                  output = response.choices[0].message.content
-                  matches = re.findall(r"(?:FILEPATH|FILE|File):\s*([^\n\s]+).*?```(?:\w+)?\s*(.*?)\s*```", output, re.DOTALL | re.IGNORECASE)
+              output = response.choices[0].message.content
+              match = re.search(r"```json\s*(.*?)\s*```", output, re.DOTALL)
+              
+              if match:
+                  new_json = match.group(1).strip()
+                  with open("composer.json", "w") as f:
+                      f.write(new_json)
+                  
+                  # الخطوة السحرية: تحديث الـ Lock File برمجياً
+                  print("Running composer update to sync lock file...")
+                  os.system("composer update --no-scripts --no-interaction")
 
-                  if not matches:
-                      print("AI did not provide a clear fix. Skipping.")
-                      repo_local.git.checkout(default_branch)
-                      continue
-
-                  for path, code in matches:
-                      path = path.strip().replace(":", "")
-                      os.makedirs(os.path.dirname(path), exist_ok=True)
-                      with open(path, 'w') as f:
-                          f.write(code.strip())
-                      print(f"Modified: {path}")
-
-                  # Commit & Push
+                  # الحفظ والرفع
+                  repo_local.git.add("composer.json", "composer.lock")
                   repo_local.config_writer().set_value("user", "name", "AI Bot").release()
                   repo_local.config_writer().set_value("user", "email", "bot@github.com").release()
-                  repo_local.git.add(A=True)
-                  repo_local.git.commit("-m", f"AI Fix for #{issue.number}")
+                  repo_local.git.commit("-m", f"Fix composer synchronization for #{issue.number}")
                   
                   remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['REPO_NAME']}.git"
-                  if 'origin_auth' not in [r.name for r in repo_local.remotes]:
-                      origin = repo_local.create_remote('origin_auth', remote_url)
-                  else: origin = repo_local.remote('origin_auth')
-                  
-                  origin.push(branch_name)
+                  origin = repo_local.remote(name='origin')
+                  origin.set_url(remote_url)
+                  repo_local.git.push('origin', branch_name, force=True)
 
-                  # إنشاء الـ Pull Request
-                  pr = repo.create_pull(
-                      title=f"🤖 Fix for #{issue.number}: {issue.title}",
-                      body=f"Automated fix. Closes #{issue.number}",
+                  repo.create_pull(
+                      title=f"🛠 Composer Fix for #{issue.number}",
+                      body=f"Synced composer.json and composer.lock.\n\nCloses #{issue.number}",
                       head=branch_name,
-                      base=default_branch
+                      base=repo.default_branch
                   )
-                  print(f"Successfully created PR: {pr.html_url}")
-                  
-                  repo_local.git.checkout(default_branch)
-              except Exception as e:
-                  print(f"Error: {e}")
-                  repo_local.git.checkout(default_branch)
           EOF
