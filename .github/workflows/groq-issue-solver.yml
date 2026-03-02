@@ -1,4 +1,4 @@
-name: Groq Auto Solver - Strict Branching & PR
+name: Groq Auto Solver - Unified Fix
 
 on:
   push:
@@ -7,6 +7,7 @@ on:
     types: [opened]
   workflow_dispatch:
 
+# إعطاء صلاحيات كاملة للتوكن لضمان عمل الـ PR
 permissions:
   contents: write
   pull-requests: write
@@ -20,6 +21,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # استخدام التوكن التلقائي
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
@@ -47,25 +49,25 @@ jobs:
           default_branch = repo.default_branch
 
           issues = [i for i in repo.get_issues(state='open') if not i.pull_request]
+          print(f"Found {len(issues)} open issues.")
 
           for issue in issues:
               branch_name = f"fix/issue-{issue.number}"
               
-              # التأكد من عدم وجود الفرع مسبقاً لتجنب التكرار
               try:
                   repo.get_branch(branch_name)
+                  print(f"Branch {branch_name} already exists. Skipping.")
                   continue
               except: pass
 
-              # 1. تنظيف بيئة Git والعودة للفرع الرئيسي قبل كل Issue
-              repo_local.git.reset('--hard')
-              repo_local.git.clean('-fd')
-              repo_local.git.checkout(default_branch)
+              print(f"Processing Issue #{issue.number}...")
               
-              # 2. إنشاء فرع جديد ومستقل لهذه المشكلة تحديداً
+              # تنظيف وإنشاء فرع جديد
+              repo_local.git.checkout(default_branch)
+              repo_local.git.pull()
               repo_local.git.checkout('-b', branch_name)
 
-              # جمع الكود
+              # جمع سياق الملفات (أول 15 ملف فقط لتجنب استهلاك التوكنز)
               context = ""
               for root, _, files in os.walk("."):
                   if any(d in root for d in ["vendor", "node_modules", ".git"]): continue
@@ -74,36 +76,41 @@ jobs:
                           p = os.path.join(root, f)
                           try:
                               with open(p, 'r') as fc:
-                                  context += f"\nFILE: {p}\nCONTENT:\n{fc.read()[:1000]}\n"
+                                  context += f"\n--- FILE: {p} ---\n{fc.read()[:800]}\n"
                           except: pass
 
-              prompt = f"Fix issue #{issue.number}: {issue.title}\n{issue.body}\n\nContext:\n{context}\n\nReturn format:\nFILEPATH: path/to/file\nCODE: ```\ncontents\n```"
+              prompt = f"Fix issue #{issue.number}: {issue.title}\n{issue.body}\n\nContext Files:\n{context}\n\nStrict Output Format:\nFILE: path/to/file.ext\nCODE: ```\nfull file content\n```"
               
               try:
                   response = client.chat.completions.create(
                       model="llama-3.3-70b-versatile",
-                      messages=[{"role": "system", "content": "You are a professional developer. Provide full file contents."},
+                      messages=[{"role": "system", "content": "You are a professional software engineer. Always provide the full file path and the full content of the file to fix the issue."},
                                 {"role": "user", "content": prompt}]
                   )
+                  
                   output = response.choices[0].message.content
-                  matches = re.findall(r"(?:FILEPATH|File):\s*([^\n\s]+).*?```(?:\w+)?\s*(.*?)\s*```", output, re.DOTALL | re.IGNORECASE)
+                  #Regex محسن للبحث عن FILE أو File أو FILEPATH
+                  matches = re.findall(r"(?:FILE|File|FILEPATH):\s*([^\n\s]+).*?```(?:\w+)?\s*(.*?)\s*```", output, re.DOTALL | re.IGNORECASE)
 
                   if not matches:
+                      print(f"AI didn't provide code in the correct format for issue #{issue.number}")
                       continue
-                  
-                  # كتابة الملفات الجديدة
+
                   for path, code in matches:
                       path = path.strip().replace(":", "")
                       os.makedirs(os.path.dirname(path), exist_ok=True)
                       with open(path, 'w') as f:
                           f.write(code.strip())
+                      print(f"Applied changes to: {path}")
 
-                  # 3. الحفظ والرفع (Commit & Push) للفرع الجديد
-                  repo_local.config_writer().set_value("user", "name", "AI Solver").release()
-                  repo_local.config_writer().set_value("user", "email", "bot@ai.com").release()
-                  repo_local.git.add(A=True)
-                  repo_local.git.commit("-m", f"AI Fix for issue #{issue.number}")
+                  # إعداد المستخدم وعمل Commit
+                  repo_local.config_writer().set_value("user", "name", "AI Bot").release()
+                  repo_local.config_writer().set_value("user", "email", "bot@github.com").release()
                   
+                  repo_local.git.add(A=True)
+                  repo_local.git.commit("-m", f"AI Fix for #{issue.number}")
+                  
+                  # الرفع باستخدام التوكن
                   remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['REPO_NAME']}.git"
                   if 'origin_auth' not in [r.name for r in repo_local.remotes]:
                       origin = repo_local.create_remote('origin_auth', remote_url)
@@ -111,24 +118,20 @@ jobs:
                   
                   origin.push(branch_name)
 
-                  # 4. إنشاء Pull Request خاص بهذا الفرع
+                  # إنشاء الـ PR
                   pr = repo.create_pull(
-                      title=f"🤖 Fix for Issue #{issue.number}",
-                      body=f"This PR was generated automatically.\n\nCloses #{issue.number}",
+                      title=f"🤖 Fix: {issue.title}",
+                      body=f"This automated PR fixes issue #{issue.number}.\n\nCloses #{issue.number}",
                       head=branch_name,
                       base=default_branch
                   )
+                  print(f"Successfully created PR: {pr.html_url}")
                   
-                  print(f"✅ Created Branch & PR {pr.html_url} for Issue #{issue.number}")
-                  
-                  # العودة للفرع الرئيسي استعداداً للمشكلة التالية
+                  # العودة للفرع الرئيسي
                   repo_local.git.checkout(default_branch)
-                  time.sleep(5)
                   
               except Exception as e:
-                  print(f"Error on issue #{issue.number}: {e}")
-                  # في حال حدوث خطأ، نضمن العودة للفرع الرئيسي
-                  repo_local.git.reset('--hard')
+                  print(f"Error processing issue #{issue.number}: {e}")
                   repo_local.git.checkout(default_branch)
 
           EOF
