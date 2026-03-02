@@ -1,11 +1,13 @@
-name: Groq Auto Solver - Fixed Version
+name: Groq Auto Solver - Immediate Execution
 
 on:
-  schedule:
-    - cron: '0 * * * *'
-  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
   issues:
-    types: [opened, labeled]
+    types: [opened]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -34,94 +36,93 @@ jobs:
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_NAME: ${{ github.repository }}
         run: |
           python << 'EOF'
           import os, openai, git, re, time
           from github import Github
 
-          # 1. إعدادات الاتصال
           client = openai.OpenAI(api_key=os.environ['GROQ_API_KEY'], base_url="https://api.groq.com/openai/v1")
           g = Github(os.environ['GITHUB_TOKEN'])
-          repo = g.get_repo(os.environ.get('GITHUB_REPOSITORY'))
+          repo = g.get_repo(os.environ['REPO_NAME'])
           repo_local = git.Repo(".")
           
-          # 2. جلب المشاكل المفتوحة
           issues = [i for i in repo.get_issues(state='open') if not i.pull_request]
           print(f"Found {len(issues)} open issues.")
 
           for issue in issues:
               branch_name = f"fix/issue-{issue.number}"
-              print(f"--- Processing Issue #{issue.number}: {issue.title} ---")
               
-              # تجنب التكرار
               try:
                   repo.get_branch(branch_name)
-                  print(f"Branch {branch_name} already exists. Skipping.")
+                  print(f"Skipping Issue #{issue.number}: Branch already exists.")
                   continue
               except: pass
 
-              # 3. جمع سياق الكود (أهم الملفات فقط لتوفير التوكنز)
+              print(f"Processing Issue #{issue.number}...")
+              
               context = ""
               for root, _, files in os.walk("."):
                   if any(d in root for d in ["vendor", "node_modules", ".git"]): continue
                   for f in files:
-                      if f.endswith((".php", ".js", ".json")):
+                      if f.endswith((".php", ".js", ".json", ".md", ".py")):
                           p = os.path.join(root, f)
-                          with open(p, 'r') as file_content:
-                              context += f"\nFile: {p}\nContent:\n{file_content.read()[:800]}\n"
+                          try:
+                              with open(p, 'r') as fc:
+                                  context += f"\nFILE: {p}\nCONTENT:\n{fc.read()[:1000]}\n"
+                          except: pass
 
-              # 4. طلب الحل من AI (بصيغة أكثر صرامة)
-              prompt = f"Fix this GitHub issue: {issue.title}\nDescription: {issue.body}\n\nFiles Context:\n{context}\n\nReturn the fix as: FILEPATH: path/to/file.php\nCODE: ```\ncode here\n```"
+              prompt = f"Fix issue #{issue.number}: {issue.title}\n{issue.body}\n\nContext:\n{context}\n\nReturn format:\nFILEPATH: path/to/file\nCODE: ```\ncontents\n```"
               
-              response = client.chat.completions.create(
-                  model="llama-3.3-70b-versatile",
-                  messages=[{"role": "system", "content": "You are an expert dev. Always provide the full file path and code block."},
-                            {"role": "user", "content": prompt}]
-              )
-              
-              output = response.choices[0].message.content
-              # نمط استخراج المسار والكود بشكل أكثر مرونة
-              matches = re.findall(r"(?:FILEPATH|File):\s*([^\n\s]+).*?```(?:\w+)?\s*(.*?)\s*```", output, re.DOTALL | re.IGNORECASE)
+              try:
+                  response = client.chat.completions.create(
+                      model="llama-3.3-70b-versatile",
+                      messages=[{"role": "system", "content": "You are a professional developer. Provide full file contents."},
+                                {"role": "user", "content": prompt}]
+                  )
+                  output = response.choices[0].message.content
+                  matches = re.findall(r"(?:FILEPATH|File):\s*([^\n\s]+).*?```(?:\w+)?\s*(.*?)\s*```", output, re.DOTALL | re.IGNORECASE)
 
-              if not matches:
-                  print("AI didn't return a clear fix format. Skipping.")
-                  continue
+                  if not matches:
+                      print(f"No code found for Issue #{issue.number}")
+                      continue
 
-              # 5. تطبيق التعديلات برمجياً
-              repo_local.git.checkout('HEAD', b=branch_name)
-              for path, code in matches:
-                  path = path.strip().replace(":", "")
-                  os.makedirs(os.path.dirname(path), exist_ok=True)
-                  with open(path, 'w') as f:
-                      f.write(code.strip())
-                  print(f"Updated file: {path}")
+                  repo_local.git.checkout(repo.default_branch)
+                  repo_local.git.checkout('-b', branch_name)
+                  
+                  for path, code in matches:
+                      path = path.strip().replace(":", "")
+                      os.makedirs(os.path.dirname(path), exist_ok=True)
+                      with open(path, 'w') as f:
+                          f.write(code.strip())
 
-              # 6. الرفع (Push)
-              repo_local.config_writer().set_value("user", "name", "AI Solver").release()
-              repo_local.config_writer().set_value("user", "email", "ai@solver.com").release()
-              repo_local.git.add(A=True)
-              repo_local.git.commit("-m", f"Fix issue #{issue.number} via AI")
-              
-              remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['GITHUB_REPOSITORY']}.git"
-              if 'origin_auth' not in [r.name for r in repo_local.remotes]:
-                  origin = repo_local.create_remote('origin_auth', remote_url)
-              else: origin = repo_local.remote('origin_auth')
-              
-              origin.push(branch_name)
+                  repo_local.config_writer().set_value("user", "name", "AI Solver").release()
+                  repo_local.config_writer().set_value("user", "email", "bot@ai.com").release()
+                  repo_local.git.add(A=True)
+                  repo_local.git.commit("-m", f"AI Fix for issue #{issue.number}")
+                  
+                  remote_url = f"https://x-access-token:{os.environ['GITHUB_TOKEN']}@github.com/{os.environ['REPO_NAME']}.git"
+                  if 'origin_auth' not in [r.name for r in repo_local.remotes]:
+                      origin = repo_local.create_remote('origin_auth', remote_url)
+                  else: origin = repo_local.remote('origin_auth')
+                  
+                  origin.push(branch_name)
 
-              # 7. فتح الـ Pull Request مع كلمة الإغلاق التلقائي
-              pr = repo.create_pull(
-                  title=f"🤖 AI Fix: {issue.title}",
-                  body=f"This PR was generated by AI to fix issue #{issue.number}.\n\nCloses #{issue.number}",
-                  head=branch_name,
-                  base=repo.default_branch
-              )
-              print(f"Successfully created PR #{pr.number}")
-              
-              # تعليق على الـ Issue الأصلي
-              issue.create_comment(f"I've generated a potential fix in PR #{pr.number}. Once merged, this issue will close.")
-              
-              # العودة للفرع الرئيسي للمشكلة التالية
-              repo_local.git.checkout(repo.default_branch)
-              time.sleep(5) # لتجنب Rate Limit الخاص بـ Groq
+                  pr = repo.create_pull(
+                      title=f"🤖 AI Fix: {issue.title}",
+                      body=f"Auto-generated fix for #{issue.number}.\n\nCloses #{issue.number}",
+                      head=branch_name,
+                      base=repo.default_branch
+                  )
+                  issue.create_comment(f"✅ AI PR created: {pr.html_url}")
+                  print(f"PR Created: {pr.html_url}")
+
+                  repo_local.git.checkout(repo.default_branch)
+                  time.sleep(5)
+                  
+              except Exception as e:
+                  print(f"Error: {e}")
+                  repo_local.git.checkout(repo.default_branch)
+
+          print("Done.")
           EOF
