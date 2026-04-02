@@ -8,19 +8,28 @@ on:
   workflow_dispatch:
 
 jobs:
-  generate:
+  generate-and-test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
         with:
-          fetch-depth: 0 
+          php-version: '8.2'
+          extensions: mbstring, xml, ctype, iconv, mysql
+          coverage: none
+
+      - name: Install Composer Dependencies
+        run: composer install --no-progress --no-suggest --prefer-dist
+
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
 
-      - name: Install Dependencies
+      - name: Install Python Dependencies
         run: pip install requests
 
       - name: Run Cerebras Generator
@@ -28,10 +37,13 @@ jobs:
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
         run: python .github/scripts/generate_docs.py
 
-      - name: Commit and Push to Docs
+      - name: Run PHPUnit Tests
+        run: php artisan test --testsuite=Unit
+
+      - name: Commit and Push
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action Bot"
           git add docs/
-          git commit -m "Update generated functions in docs" || echo "No changes to commit"
+          git commit -m "Auto-update docs via Cerebras" || echo "No changes"
           git push
