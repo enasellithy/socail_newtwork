@@ -26,7 +26,7 @@ jobs:
 
       - name: Install Composer Dependencies
         run: |
-          composer install --no-progress --no-suggest --prefer-dist
+          composer update --no-interaction --prefer-dist
           cp .env.example .env
           php artisan key:generate
 
@@ -56,7 +56,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: '❌ Test Failure Alert: Unit Tests Failed',
-              body: 'The automated tests failed during the Cerebras generation workflow. Please check the [Action Logs](' + context.payload.repository.html_url + '/actions/runs/' + context.runId + ') for more details.'
+              body: 'The automated tests failed during the Cerebras generation workflow. Check logs: ' + context.payload.repository.html_url + '/actions/runs/' + context.runId
             })
 
       - name: Commit and Push
