@@ -1,0 +1,37 @@
+name: Cerebras Function Generator
+
+on:
+  push:
+    paths:
+      - 'app/Http/**'
+      - 'app/SOLID/**'
+  workflow_dispatch:
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install Dependencies
+        run: pip install requests
+
+      - name: Run Cerebras Generator
+        env:
+          CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
+        run: python .github/scripts/generate_docs.py
+
+      - name: Commit and Push to Docs
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action Bot"
+          git add docs/
+          git commit -m "Update generated functions in docs" || echo "No changes to commit"
+          git push
