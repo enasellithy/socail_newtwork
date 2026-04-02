@@ -16,7 +16,7 @@ def ask_cerebras(code_content):
     }
     
     data = {
-        "model": "llama3.1-70b",
+        "model": "llama3.1-8b",
         "messages": [
             {
                 "role": "system", 
@@ -53,7 +53,7 @@ for s_dir in source_dirs:
                 print(f"Processing: {input_path}")
                 
                 try:
-                    with open(input_path, 'r') as f:
+                    with open(input_path, 'r', encoding='utf-8') as f:
                         content = f.read()
                     
                     generated_content = ask_cerebras(content)
@@ -62,10 +62,10 @@ for s_dir in source_dirs:
                         output_filename = filename.replace(".php", ".md")
                         output_path = os.path.join(output_dir, output_filename)
                         
-                        with open(output_path, 'w') as f:
+                        with open(output_path, 'w', encoding='utf-8') as f:
                             f.write(generated_content)
                         print(f"Saved: {output_path}")
                 except Exception as e:
-                    print(f"Could not read file {input_path}: {e}")
+                    print(f"Could not process {input_path}: {e}")
 
 print("Done!")
