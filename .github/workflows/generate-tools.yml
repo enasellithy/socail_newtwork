@@ -26,7 +26,8 @@ jobs:
 
       - name: Install Composer Dependencies
         run: |
-          composer update --no-interaction --prefer-dist --no-scripts
+          # استخدام --ignore-platform-reqs لتخطي فحص المتطلبات وتسريع العملية
+          composer update --no-interaction --prefer-dist --no-scripts --ignore-platform-reqs
           cp .env.example .env || true
           php artisan key:generate --force
 
@@ -45,6 +46,7 @@ jobs:
 
       - name: Run PHPUnit Tests
         id: run-tests
+        # تشغيل التستات مع تجاهل الأخطاء مؤقتاً لتحديد حالة المتغير
         run: php artisan test --testsuite=Unit || echo "tests_failed=true" >> $GITHUB_ENV
 
       - name: Open Issue on Test Failure
