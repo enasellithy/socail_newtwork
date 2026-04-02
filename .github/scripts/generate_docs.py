@@ -5,7 +5,7 @@ def ask_cerebras(code_content):
     api_key = os.getenv('CEREBRAS_API_KEY')
     
     if not api_key:
-        print("Error: CEREBRAS_API_KEY is not set in environment variables.")
+        print("Error: CEREBRAS_API_KEY is not set.")
         return None
 
     url = "https://api.cerebras.ai/v1/chat/completions"
@@ -16,7 +16,7 @@ def ask_cerebras(code_content):
     }
     
     data = {
-        "model": "llama3.1-70b", 
+        "model": "llama3.1-70b",
         "messages": [
             {
                 "role": "system", 
@@ -28,10 +28,12 @@ def ask_cerebras(code_content):
     
     try:
         response = requests.post(url, json=data, headers=headers)
-        response.raise_for_status() 
+        if response.status_code != 200:
+            print(f"Failed with status {response.status_code}: {response.text}")
+            return None
         return response.json()['choices'][0]['message']['content']
     except Exception as e:
-        print(f"Request failed: {e}")
+        print(f"Error: {e}")
         return None
 
 source_dirs = ['app/Http', 'app/SOLID']
@@ -50,17 +52,20 @@ for s_dir in source_dirs:
                 input_path = os.path.join(root, filename)
                 print(f"Processing: {input_path}")
                 
-                with open(input_path, 'r') as f:
-                    content = f.read()
-                
-                generated_content = ask_cerebras(content)
-                
-                if generated_content:
-                    output_filename = filename.replace(".php", ".md")
-                    output_path = os.path.join(output_dir, output_filename)
+                try:
+                    with open(input_path, 'r') as f:
+                        content = f.read()
                     
-                    with open(output_path, 'w') as f:
-                        f.write(generated_content)
-                    print(f"Saved: {output_path}")
+                    generated_content = ask_cerebras(content)
+                    
+                    if generated_content:
+                        output_filename = filename.replace(".php", ".md")
+                        output_path = os.path.join(output_dir, output_filename)
+                        
+                        with open(output_path, 'w') as f:
+                            f.write(generated_content)
+                        print(f"Saved: {output_path}")
+                except Exception as e:
+                    print(f"Could not read file {input_path}: {e}")
 
 print("Done!")
